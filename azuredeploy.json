@@ -1,0 +1,443 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "adminUsername": {
+        "type": "string",
+        "metadata": {
+          "description": "Admin username on all VMs."
+        }
+      },
+      "adminPassword": {
+        "type": "string",
+        "metadata": {
+          "description": "Admin password on all VMs."
+        }
+      },
+      
+    "OSVersion": {
+      "type": "string",
+      "defaultValue": "2019-Datacenter",
+      "allowedValues": [
+        "2008-R2-SP1",
+        "2012-Datacenter",
+        "2012-R2-Datacenter",
+        "2016-Nano-Server",
+        "2016-Datacenter-with-Containers",
+        "2016-Datacenter",
+        "2019-Datacenter",
+        "2019-Datacenter-Core",
+        "2019-Datacenter-Core-smalldisk",
+        "2019-Datacenter-Core-with-Containers",
+        "2019-Datacenter-Core-with-Containers-smalldisk",
+        "2019-Datacenter-smalldisk",
+        "2019-Datacenter-with-Containers",
+        "2019-Datacenter-with-Containers-smalldisk"
+      ],
+      "metadata": {
+        "description": "The Windows version for the VM. This will pick a fully patched image of this given Windows version."
+      }
+    }
+      
+    },
+    "variables": 
+    {
+      "vmssName": "myscaleset",
+      "instanceCount": "2",
+      "vmSize": "Standard_D2s_v3",
+      "virtualNetworkName": "[concat(variables('vmssName'), 'vnet')]",
+      "subnetName": "[concat(variables('vmssName'), 'subnet')]",
+      "azurebastionsubnetname" : "AzureBastionSubnet",
+      "bastionHostsname" : "AzureBastionHost",
+      "nicName": "[concat(variables('vmssName'), 'nic')]",
+      "ipConfigName": "[concat(variables('vmssName'), 'ipconfig')]",
+      "addressPrefix": "10.0.0.0/16",
+      "subnetPrefix": "10.0.0.0/27",
+      "azurebastionaddressprefix" : "10.0.1.0/28",
+      "publicIPAddressName": "[concat(variables('vmssName'), 'publicip')]",
+      "bastionIPAddressName": "[concat(variables('vmssName'), 'bastionpublicip')]",
+      "networkSecurityGroupName": "[concat(variables('vmssName'), 'nsg')]",
+      "loadBalancerName": "[concat(variables('vmssName'), 'lb')]",
+      "publicIPAddressID": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]",
+      "bastionIPAddressID": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionIPAddressName'))]",
+      "lbID": "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]",
+      "bePoolName": "[concat(variables('vmssName'), 'bepool')]",
+      "lbPoolID": "[concat(variables('lbID'),'/backendAddressPools/',variables('bePoolName'))]",
+      "lbProbeID": "[concat(variables('lbID'),'/probes/tcpProbe')]",
+      "frontEndIPConfigID": "[concat(variables('lbID'), '/frontendIPConfigurations/loadBalancerFrontEnd')]",
+      "location": "[resourceGroup().location]",
+      "storageAccountName": "[concat(variables('vmssName'), 'storage')]",
+      "osType": {
+          "publisher": "MicrosoftWindowsServer",
+          "offer": "WindowsServer",
+          "sku": "[parameters('OSVersion')]",
+          "version": "latest"
+      },
+      "imageReference": "[variables('osType')]"
+    },
+    "resources": [
+        {
+        "type": "Microsoft.Storage/storageAccounts",
+        "apiVersion": "2019-06-01",
+        "name": "[variables('storageAccountName')]",
+        "location": "[variables('location')]",
+        "sku": {
+            "name": "Standard_LRS"
+        },
+            "kind": "Storage"
+       },
+        
+        {
+        "type": "Microsoft.Network/networkSecurityGroups",
+        "apiVersion": "2017-06-01",
+        "name": "[variables('networkSecurityGroupName')]",
+        "location": "[variables('location')]",
+        "properties": {
+            "securityRules": [
+                {
+                    "name": "Port_443_HTTPS",
+                    "properties": {
+                        "description": "Allow HTTPS traffic",
+                        "protocol": "Tcp",
+                        "sourcePortRange": "*",
+                        "destinationPortRange": "443",
+                        "sourceAddressPrefix": "*",
+                        "destinationAddressPrefix": "10.0.0.0/27",
+                        "access": "Allow",
+                        "priority": 100,
+                        "direction": "Inbound"
+                    }
+                },
+                {
+                    "name": "allowHTTP",
+                    "properties": {
+                        "description": "Allow web traffic",
+                        "protocol": "Tcp",
+                        "sourcePortRange": "*",
+                        "destinationPortRange": "80",
+                        "sourceAddressPrefix": "*",
+                        "destinationAddressPrefix": "10.0.0.0/27",
+                        "access": "Allow",
+                        "priority": 110,
+                        "direction": "Inbound"
+                    }
+                },
+                {
+                        "name": "Deny-Internet-Access",
+                        "properties": {
+                            "protocol": "*",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "*",
+                            "sourceAddressPrefix": "VirtualNetwork",
+                            "destinationAddressPrefix": "Internet",
+                            "access": "Deny",
+                            "priority": 120,
+                            "direction": "Outbound",
+                            "sourcePortRanges": [],
+                            "destinationPortRanges": [],
+                            "sourceAddressPrefixes": [],
+                            "destinationAddressPrefixes": []
+                        }
+                }
+            ]
+        }
+      },
+      {
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[variables('virtualNetworkName')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/networkSecurityGroups/', variables('networkSecurityGroupName'))]"
+            ],
+            "location": "[variables('location')]",
+            "apiVersion": "2017-06-01",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('addressPrefix')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('subnetName')]",
+                        "properties": {
+                            "addressPrefix": "[variables('subnetPrefix')]",
+                            "serviceEndpoints": [],
+                            "delegations": [],
+                            "privateEndpointNetworkPolicies": "Enabled",
+                            "privateLinkServiceNetworkPolicies": "Enabled"
+                        }
+                    },
+                    {
+                      "name": "[variables('azurebastionsubnetname')]",
+                      "properties": {
+                          "addressPrefix": "[variables('azurebastionaddressprefix')]",
+                          "serviceEndpoints": [],
+                          "delegations": [],
+                          "privateEndpointNetworkPolicies": "Enabled",
+                          "privateLinkServiceNetworkPolicies": "Enabled"
+                      }
+                  }
+                    
+                ],
+                "virtualNetworkPeerings": [],
+                "enableDdosProtection": false
+            }
+        },
+        {
+        "type": "Microsoft.Network/publicIPAddresses",
+        "apiVersion": "2017-08-01",
+        "name": "[variables('publicIPAddressName')]",
+        "location": "[variables('location')]",
+        "sku": {
+            "name": "Basic"
+        },
+        "properties": {
+            "publicIPAllocationMethod": "Dynamic"
+        }
+      },
+      {
+        "type": "Microsoft.Network/publicIPAddresses",
+        "apiVersion": "2017-08-01",
+        "name": "[variables('bastionIPAddressName')]",
+        "location": "[variables('location')]",
+        "sku": {
+            "name": "Basic"
+        },
+        "properties": {
+            "publicIPAllocationMethod": "Dynamic"
+        }
+      },
+      {
+        "type": "Microsoft.Network/loadBalancers",
+        "apiVersion": "2017-08-01",
+        "name": "[variables('loadBalancerName')]",
+        "location": "[variables('location')]",
+        "sku": {
+            "name": "Basic"
+        },
+        "dependsOn": [
+            "[variables('publicIPAddressName')]"
+        ],
+        "properties": {
+            "frontendIPConfigurations": [
+                {
+                    "name": "LoadBalancerFrontEnd",
+                    "properties": {
+                        "publicIPAddress": {
+                            "id": "[variables('publicIPAddressID')]"
+                        }
+                    }
+                }
+            ],
+            "backendAddressPools": [
+                {
+                    "name": "[variables('bePoolName')]"
+                }
+            ],
+            "probes": [
+              {
+                "name": "tcpProbe",
+                "properties": {
+                  "protocol": "Tcp",
+                  "port": 80,
+                  "intervalInSeconds": 5,
+                  "numberOfProbes": 2
+                }
+              },
+              {
+                "name": "myHealthProbe",
+                "properties": {
+                    "protocol": "Http",
+                    "port": 80,
+                    "requestPath": "/",
+                    "intervalInSeconds": 15,
+                    "numberOfProbes": 2
+                }
+              }
+            ],
+            "loadBalancingRules": [
+              {
+                "name": "LBRule",
+                "properties": {
+                  "frontendIPConfiguration": {
+                    "id": "[variables('frontEndIPConfigID')]"
+                  },
+                  "backendAddressPool": {
+                    "id": "[variables('lbPoolID')]"
+                  },
+                  "protocol": "Tcp",
+                  "frontendPort": 80,
+                  "backendPort": 80,
+                  "enableFloatingIP": false,
+                  "idleTimeoutInMinutes": 5,
+                  "probe": {
+                    "id": "[variables('lbProbeID')]"
+                  }
+                }
+              }
+            ],
+            "inboundNatPools": [],
+            "outboundRules": [],
+            "inboundNatRules": []
+          }
+      },
+      {
+        "type": "Microsoft.Network/bastionHosts",
+        "dependsOn": [
+          "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+        ],
+        "apiVersion": "2020-11-01",
+        "name": "[variables('bastionHostsname')]",
+        "location": "[variables('location')]",
+        "sku": {
+            "name": "Basic"
+        },
+        "properties": {
+            "dnsName": "bst-bafa7501-9e18-47d4-9013-6adf545fd934.bastion.azure.com",
+            "ipConfigurations": [
+                {
+                    "name": "IpConf",
+                    "properties": {
+                        "privateIPAllocationMethod": "Dynamic",
+                        "publicIPAddress": {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name,'providers/Microsoft.Network/publicIPAddresses/',variables('bastionIPAddressID'))]"
+                        },
+                        "subnet": {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'), '/subnets/', variables('azurebastionsubnetname'))]"
+                        }
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "type": "Microsoft.Compute/virtualMachineScaleSets",
+        "name": "[variables('vmssName')]",
+        "location": "[variables('location')]",
+        "apiVersion": "2017-03-30",
+        "dependsOn": [
+          "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
+          "[concat('Microsoft.Network/loadBalancers/', variables('loadBalancerName'))]",
+          "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
+        ],
+        "sku": {
+          "name": "[variables('vmSize')]",
+          "tier": "Standard",
+          "capacity": "[variables('instanceCount')]"
+        },
+        "properties": {
+          "upgradePolicy": {
+            "mode": "Automatic"
+          },
+          "virtualMachineProfile": {
+            "storageProfile": {
+              "osDisk": {
+                "caching": "ReadOnly",
+                "createOption": "FromImage"
+              },
+              "imageReference": "[variables('imageReference')]"
+            },
+            "osProfile": {
+              "computerNamePrefix": "vmscale",
+              "adminUsername": "[parameters('adminUsername')]",
+              "adminPassword": "[parameters('adminPassword')]"
+            },
+            "networkProfile": {
+              "networkInterfaceConfigurations": [
+                {
+                  "name": "[variables('nicName')]",
+                  "properties": {
+                    "primary": true,
+                    "ipConfigurations": [
+                      {
+                        "name": "[variables('ipConfigName')]",
+                        "properties": {
+                          "subnet": {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'), '/subnets/', variables('subnetName'))]"
+                          },
+                          "loadBalancerBackendAddressPools": [
+                            {
+                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('loadBalancerName'), variables('bePoolName'))]"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+            
+          },
+          "overprovision": true
+        }
+      },
+
+      {
+        "type": "Microsoft.insights/autoscaleSettings",
+        "apiVersion": "2015-04-01",
+        "name": "Autoscale",
+        "location": "[variables('location')]",
+        "dependsOn": [
+          "[concat('Microsoft.Compute/virtualMachineScaleSets/', variables('vmssName'))]"
+        ],
+        "properties": {
+          "name": "Autoscale",
+          "targetResourceUri": "[concat('/subscriptions/',subscription().subscriptionId, '/resourceGroups/',  resourceGroup().name, '/providers/Microsoft.Compute/virtualMachineScaleSets/', variables('vmssName'))]",
+          "enabled": true,
+          "profiles": [
+            {
+              "name": "Autoscale by percentage based on CPU usage",
+              "capacity": {
+                "minimum": "2",
+                "maximum": "10",
+                "default": "2"
+              },
+              "rules": [
+                {
+                  "metricTrigger": {
+                    "metricName": "Percentage CPU",
+                    "metricNamespace": "",
+                    "metricResourceUri": "[concat('/subscriptions/',subscription().subscriptionId, '/resourceGroups/',  resourceGroup().name, '/providers/Microsoft.Compute/virtualMachineScaleSets/', variables('vmssName'))]",
+                    "timeGrain": "PT1M",
+                    "statistic": "Average",
+                    "timeWindow": "PT5M",
+                    "timeAggregation": "Average",
+                    "operator": "GreaterThan",
+                    "threshold": 60
+                  },
+                  "scaleAction": {
+                    "direction": "Increase",
+                    "type": "ChangeCount",
+                    "value": "3",
+                    "cooldown": "PT5M"
+                  }
+                },
+                {
+                  "metricTrigger": {
+                    "metricName": "Percentage CPU",
+                    "metricNamespace": "",
+                    "metricResourceUri": "[concat('/subscriptions/',subscription().subscriptionId, '/resourceGroups/',  resourceGroup().name, '/providers/Microsoft.Compute/virtualMachineScaleSets/', variables('vmssName'))]",
+                    "timeGrain": "PT1M",
+                    "statistic": "Average",
+                    "timeWindow": "PT5M",
+                    "timeAggregation": "Average",
+                    "operator": "LessThan",
+                    "threshold": 30
+                  },
+                  "scaleAction": {
+                    "direction": "Decrease",
+                    "type": "ChangeCount",
+                    "value": "1",
+                    "cooldown": "PT5M"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+
+        
+    ]
+}
