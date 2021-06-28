@@ -14,7 +14,6 @@
           "description": "Admin password on all VMs."
         }
       },
-      
     "OSVersion": {
       "type": "string",
       "defaultValue": "2019-Datacenter",
@@ -55,11 +54,10 @@
       "subnetPrefix": "10.0.0.0/27",
       "azurebastionaddressprefix" : "10.0.1.0/28",
       "publicIPAddressName": "[concat(variables('vmssName'), 'publicip')]",
-      "bastionIPAddressName": "[concat(variables('vmssName'), 'bastionpublicip')]",
       "networkSecurityGroupName": "[concat(variables('vmssName'), 'nsg')]",
       "loadBalancerName": "[concat(variables('vmssName'), 'lb')]",
       "publicIPAddressID": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]",
-      "bastionIPAddressID": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionIPAddressName'))]",
+      "bastionIPAddressName": "[format('{0}-pip', variables('bastionHostsname'))]",
       "lbID": "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]",
       "bePoolName": "[concat(variables('vmssName'), 'bepool')]",
       "lbPoolID": "[concat(variables('lbID'),'/backendAddressPools/',variables('bePoolName'))]",
@@ -196,17 +194,46 @@
         }
       },
       {
-        "type": "Microsoft.Network/publicIPAddresses",
-        "apiVersion": "2017-08-01",
-        "name": "[variables('bastionIPAddressName')]",
-        "location": "[variables('location')]",
-        "sku": {
-            "name": "Basic"
-        },
-        "properties": {
-            "publicIPAllocationMethod": "Dynamic"
-        }
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2017-08-01",
+      "name": "[variables('bastionIPAddressName')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "Standard"
       },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+      },
+
+      {
+        "type": "Microsoft.Network/bastionHosts",
+        "apiVersion": "2019-06-01",
+        "name": "[variables('bastionHostsname')]",
+        "location": "[variables('location')]",
+        "dependsOn": [
+            "[resourceId('Microsoft.Network/publicIpAddresses', variables('bastionIPAddressName'))]",
+             "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+        ],
+        "properties": {
+            "ipConfigurations": [
+                {
+                    "name": "IpConf",
+                    "properties": {
+                        "subnet": {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'), '/subnets/', variables('azurebastionsubnetname'))]"
+                        },
+                        "publicIPAddress": {
+                            "id": "[resourceId('Microsoft.Network/publicIpAddresses', variables('bastionIPAddressName'))]"
+                        }
+                    }
+                }
+            ]
+        },
+        "tags": {}
+    },
+
+
       {
         "type": "Microsoft.Network/loadBalancers",
         "apiVersion": "2017-08-01",
@@ -282,35 +309,6 @@
           }
       },
       {
-        "type": "Microsoft.Network/bastionHosts",
-        "dependsOn": [
-          "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
-        ],
-        "apiVersion": "2020-11-01",
-        "name": "[variables('bastionHostsname')]",
-        "location": "[variables('location')]",
-        "sku": {
-            "name": "Basic"
-        },
-        "properties": {
-            "dnsName": "bst-bafa7501-9e18-47d4-9013-6adf545fd934.bastion.azure.com",
-            "ipConfigurations": [
-                {
-                    "name": "IpConf",
-                    "properties": {
-                        "privateIPAllocationMethod": "Dynamic",
-                        "publicIPAddress": {
-                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name,'providers/Microsoft.Network/publicIPAddresses/',variables('bastionIPAddressID'))]"
-                        },
-                        "subnet": {
-                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'), '/subnets/', variables('azurebastionsubnetname'))]"
-                        }
-                    }
-                }
-            ]
-        }
-    },
-    {
         "type": "Microsoft.Compute/virtualMachineScaleSets",
         "name": "[variables('vmssName')]",
         "location": "[variables('location')]",
