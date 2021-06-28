@@ -12,7 +12,7 @@ STEP 3
 
 Execute this script Configure_Extension_VM.PS1 to install custom page and IIS on the Virtual Scale SET.
 
-STEP 5 
+STEP 4 
 
 Get Public Load Balance IP Address from the Portal
 
