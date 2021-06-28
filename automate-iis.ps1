@@ -22,5 +22,5 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-Add-WindowsFeature Web-Server
+Install-WindowsFeature -name Web-Server -IncludeManagementTools
 Set-Content -Path "C:\inetpub\wwwroot\Default.htm" -Value "Hello World from updated host $($env:computername) !"
